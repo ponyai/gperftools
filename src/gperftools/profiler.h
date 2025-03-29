@@ -139,6 +139,8 @@ PERFTOOLS_DLL_DECL void ProfilerStop(void);
  */
 PERFTOOLS_DLL_DECL void ProfilerFlush(void);
 
+PERFTOOLS_DLL_DECL void ProfilerPause();
+PERFTOOLS_DLL_DECL void ProfilerResume();
 
 /* DEPRECATED: these functions were used to enable/disable profiling
  * in the current thread, but no longer do anything.
