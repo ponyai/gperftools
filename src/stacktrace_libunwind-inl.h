@@ -58,7 +58,11 @@ extern "C" {
 // recursive request, we'd end up with infinite recursion or deadlock.
 // Luckily, it's safe to ignore those subsequent traces.  In such
 // cases, we return 0 to indicate the situation.
-static __thread int recursive ATTR_INITIAL_EXEC;
+
+// NOTE(yikai): removed ATTR_INITIAL_EXEC because it breaks dlopen for libraries linked with profiler
+// The reason why it was added is this issue: https://github.com/gperftools/gperftools/issues/786
+// That is only for tcmalloc, not for profiler. For profiler, recursive is not possible.
+static __thread int recursive /* ATTR_INITIAL_EXEC */ ;
 
 #if defined(TCMALLOC_ENABLE_UNWIND_FROM_UCONTEXT) && (defined(__i386__) || defined(__x86_64__)) && defined(__GNU_LIBRARY__)
 #define BASE_STACKTRACE_UNW_CONTEXT_IS_UCONTEXT 1
