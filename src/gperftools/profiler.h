@@ -154,6 +154,7 @@ PERFTOOLS_DLL_DECL int ProfilingIsEnabledForAllThreads(void);
 /* Routine for registering new threads with the profiler.
  */
 PERFTOOLS_DLL_DECL void ProfilerRegisterThread(void);
+PERFTOOLS_DLL_DECL void ProfilerUnregisterThread(void);
 
 /* Stores state about profiler's current status into "*state". */
 struct ProfilerState {

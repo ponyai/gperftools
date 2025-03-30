@@ -371,6 +371,10 @@ extern "C" PERFTOOLS_DLL_DECL void ProfilerRegisterThread() {
   ProfileHandlerRegisterThread();
 }
 
+extern "C" PERFTOOLS_DLL_DECL void ProfilerUnregisterThread() {
+  ProfileHandlerUnregisterThread();
+}
+
 extern "C" PERFTOOLS_DLL_DECL void ProfilerFlush() {
   CpuProfiler::instance_.FlushTable();
 }

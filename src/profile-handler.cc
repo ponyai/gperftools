@@ -97,18 +97,22 @@ struct ProfileHandlerToken {
 class ScopedSignalBlocker {
  public:
   ScopedSignalBlocker(int signo) {
+    sigset_t sig_set_;
     sigemptyset(&sig_set_);
     sigaddset(&sig_set_, signo);
-    RAW_CHECK(sigprocmask(SIG_BLOCK, &sig_set_, NULL) == 0,
+    RAW_CHECK(sigprocmask(SIG_BLOCK, &sig_set_, &recover_sig_set_) == 0,
               "sigprocmask (block)");
   }
   ~ScopedSignalBlocker() {
-    RAW_CHECK(sigprocmask(SIG_UNBLOCK, &sig_set_, NULL) == 0,
-              "sigprocmask (unblock)");
+    // recover to old state. so that if it was already blocked before this, we would not unblock it
+    RAW_CHECK(sigprocmask(SIG_SETMASK, &recover_sig_set_, NULL) == 0,
+              "sigprocmask (recover)");
   }
+  // can be used to modify the recover sig_set
+  sigset_t& recover_sig_set() { return recover_sig_set_; }
 
  private:
-  sigset_t sig_set_;
+  sigset_t recover_sig_set_;
 };
 
 // This class manages profile timers and associated signal handler. This is a
@@ -117,6 +121,7 @@ class ProfileHandler {
  public:
   // Registers the current thread with the profile handler.
   void RegisterThread();
+  void UnregisterThread();
 
   // Registers a callback routine to receive profile timer ticks. The returned
   // token is to be used when unregistering this callback and must not be
@@ -415,6 +420,22 @@ void ProfileHandler::RegisterThread() {
   UpdateTimer(callback_count_ > 0);
 }
 
+void ProfileHandler::UnregisterThread() {
+  SpinLockHolder cl(&control_lock_);
+
+  ScopedSignalBlocker block(signal_number_);
+  SpinLockHolder sl(&signal_lock_);
+#if HAVE_LINUX_SIGEV_THREAD_ID
+  if (per_thread_timer_enabled_) {
+    ThreadTimerDestructor(tcmalloc::GetTlsValue(thread_timer_key));
+    RAW_CHECK(tcmalloc::SetTlsValue(thread_timer_key, nullptr) == 0, "tcmalloc::SetTlsValue");
+    return;
+  }
+#endif
+  // completely block the signal in this thread
+  sigaddset(&block.recover_sig_set(), signal_number_);
+}
+
 ProfileHandlerToken* ProfileHandler::RegisterCallback(
     ProfileHandlerCallback callback, void* callback_arg) {
 
@@ -560,6 +581,10 @@ REGISTER_MODULE_INITIALIZER(profile_main, ProfileHandlerRegisterThread());
 
 void ProfileHandlerRegisterThread() {
   ProfileHandler::Instance()->RegisterThread();
+}
+
+void ProfileHandlerUnregisterThread() {
+  ProfileHandler::Instance()->UnregisterThread();
 }
 
 ProfileHandlerToken* ProfileHandlerRegisterCallback(

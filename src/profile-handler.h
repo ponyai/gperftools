@@ -97,6 +97,12 @@ typedef void (*ProfileHandlerCallback)(int sig, siginfo_t* sig_info,
 void ProfileHandlerRegisterThread();
 
 /*
+  Unregister current thread, so that this thread will not receive signals and
+  will not be counted in profile result. This cannot be undone.
+ */
+void ProfileHandlerUnregisterThread();
+
+/*
  * Registers a callback routine. This callback function will be called in the
  * context of SIGPROF handler, so must be async-signal-safe. The returned token
  * is to be used when unregistering this callback via
