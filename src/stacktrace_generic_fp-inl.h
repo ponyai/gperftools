@@ -189,15 +189,69 @@ int capture(void **result, int max_depth, int skip_count,
   constexpr uintptr_t kAlignment = 16;
 #endif
 
+  // NOTE: use lamda instead of function for easier readability as a patch (less code change)
+  // Basic sanity check that frame_ptr is a valid frame pointer as the parent frame for a known child frame pointer
+  auto ValidateFramePointer = [](uintptr_t frame_ptr, uintptr_t child_frame_ptr) -> bool {
+    if (((frame_ptr + sizeof(frame)) & (kAlignment - 1)) != 0) {
+      return false;
+    }
+    if (frame_ptr < kTooSmallAddr) {
+      return false;
+    }
+    if (frame_ptr - child_frame_ptr > kFrameSizeThreshold) {
+      return false;
+    }
+    return true;
+  };
+
+  auto GetValidatedFramePointerOrNull = [&](uintptr_t frame_ptr, uintptr_t child_frame_ptr) -> uintptr_t {
+    if (!ValidateFramePointer(frame_ptr, child_frame_ptr)) {
+      return 0;
+    }
+
+    // NOTE: workaround for clang-10
+    // https://docs.google.com/document/d/1zxAmXmzdfV0vajjowEj2txgSBkq8j1ir7bbA7NrejIo/edit#
+#if defined(__aarch64__) && defined(__clang_major__) && __clang_major__ == 10
+#define IS_AARCH64_CLANG10
+#endif
+
+#ifdef IS_AARCH64_CLANG10
+    // we need the read at the frame pointer for this workaround, so we need to do readable check here
+    if (!UnsafeAccesses) {
+      // first check: we can read "frame_ptr->parent"
+      // second check: we can read (frame_ptr+8*8)->parent, see the loop in below.
+      //               use frame_ptr as the "checked_ptr" so that it would more likely to be on the fast path
+      if (!CheckPageIsReadable(reinterpret_cast<void*>(frame_ptr), reinterpret_cast<void*>(child_frame_ptr)) ||
+          !CheckPageIsReadable(reinterpret_cast<void*>(frame_ptr + 8 * 8), reinterpret_cast<void*>(frame_ptr))) {
+        return 0;
+      }
+    }
+    // 8 callee-saved floating point registers
+    for (int i = 0 ; i <= 8 ; i ++, frame_ptr += 8) {
+      uintptr_t maybe_pc = reinterpret_cast<uintptr_t>(reinterpret_cast<frame*>(frame_ptr)->pc);
+      // Also check the (maybe) pc address to make sure this frame is valid.
+      // 0. aarch64 instructions are fixed 32bit, so 4-byte aligned
+      // 1. the address must be in user space (https://www.kernel.org/doc/html/latest/arch/arm64/memory.html)
+      // 2. the address is NOT near current stack address
+      //    (this is heuristic, but it would eliminate many cases, because the bogus pointer likely point to some value in the stack)
+      if ((maybe_pc & 0x3) == 0 &&
+          maybe_pc > 0 && maybe_pc < 0x0000ffffffffffffULL &&
+          (maybe_pc < frame_ptr ? frame_ptr - maybe_pc : maybe_pc - frame_ptr) > kFrameSizeThreshold &&
+          ValidateFramePointer(reinterpret_cast<frame*>(frame_ptr)->parent, frame_ptr)) {
+        return frame_ptr;
+      }
+    }
+    return 0;
+#else
+    return frame_ptr;
+#endif
+  };
+
   uintptr_t current_frame_addr = reinterpret_cast<uintptr_t>(__builtin_frame_address(0));
-  uintptr_t initial_frame_addr = reinterpret_cast<uintptr_t>(initial_frame);
-  if (((initial_frame_addr + sizeof(frame)) & (kAlignment - 1)) != 0) {
-    return i;
-  }
-  if (initial_frame_addr < kTooSmallAddr) {
-    return i;
-  }
-  if (initial_frame_addr - current_frame_addr > kFrameSizeThreshold) {
+  uintptr_t initial_frame_addr = GetValidatedFramePointerOrNull(
+      reinterpret_cast<uintptr_t>(initial_frame), current_frame_addr);
+  if (!initial_frame_addr) {
+
     return i;
   }
 
@@ -205,13 +259,16 @@ int capture(void **result, int max_depth, int skip_count,
   // bogus. Which is true if this code is built with
   // -fno-omit-frame-pointer.
   frame* prev_f = reinterpret_cast<frame*>(current_frame_addr);
-  frame *f = adjust_fp(reinterpret_cast<frame*>(initial_frame));
+  frame *f = adjust_fp(reinterpret_cast<frame*>(initial_frame_addr));
 
   while (i < max_depth) {
+#ifndef IS_AARCH64_CLANG10
+    // for aarch64 clang10, the readable check is already done in GetValidatedFramePointerOrNull
     if (!UnsafeAccesses
         && !CheckPageIsReadable(&f->parent, prev_f)) {
       break;
     }
+#endif
 
     void* pc = f->pc;
     if (pc == nullptr) {
@@ -227,23 +284,9 @@ int capture(void **result, int max_depth, int skip_count,
 
     i++;
 
-    uintptr_t parent_frame_addr = f->parent;
     uintptr_t child_frame_addr = reinterpret_cast<uintptr_t>(f);
-
-    if (parent_frame_addr < kTooSmallAddr) {
-      break;
-    }
-
-    // stack grows towards smaller addresses, so if we didn't see
-    // frame address increased (going from child to parent), it is bad
-    // frame. We also test if frame is too big since that is another
-    // sign of bad stack frame.
-    if (parent_frame_addr - child_frame_addr > kFrameSizeThreshold) {
-      break;
-    }
-
-    if (((parent_frame_addr + sizeof(frame)) & (kAlignment - 1)) != 0) {
-      // not aligned, so we keep it safe and assume frame is bogus
+    uintptr_t parent_frame_addr = GetValidatedFramePointerOrNull(f->parent, child_frame_addr);
+    if (!parent_frame_addr) {
       break;
     }
 
