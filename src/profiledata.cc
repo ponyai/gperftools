@@ -121,7 +121,7 @@ bool ProfileData::Start(const char* fname,
   evict_[num_evicted_++] = 3;                     // depth for header
   evict_[num_evicted_++] = 0;                     // Version number
   CHECK_NE(0, options.frequency());
-  int period = 1000000 / options.frequency();
+  int period = static_cast<int>(1000000 / options.frequency());
   evict_[num_evicted_++] = period;                // Period (microseconds)
   evict_[num_evicted_++] = 0;                     // Padding
 

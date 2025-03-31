@@ -165,7 +165,7 @@ class ProfileHandler {
   int64_t interrupts_ GUARDED_BY(signal_lock_);
 
   // Profiling signal interrupt frequency, read-only after construction.
-  int32_t frequency_;
+  float frequency_;
 
   // ITIMER_PROF (which uses SIGPROF), or ITIMER_REAL (which uses SIGALRM).
   // Translated into an equivalent choice of clock if per_thread_timer_enabled_
@@ -278,7 +278,7 @@ static void CreateThreadTimerKey(tcmalloc::TlsKey *pkey) {
 }
 
 static void StartLinuxThreadTimer(int timer_type, int signal_number,
-                                  int32_t frequency, tcmalloc::TlsKey timer_key) {
+                                  float frequency, tcmalloc::TlsKey timer_key) {
   int rv;
   struct sigevent sevp;
   timer_t timerid;
@@ -303,7 +303,7 @@ static void StartLinuxThreadTimer(int timer_type, int signal_number,
   }
 
   its.it_interval.tv_sec = 0;
-  its.it_interval.tv_nsec = 1000000000 / frequency;
+  its.it_interval.tv_nsec = static_cast<long>(1000000000.0 / frequency);
   its.it_value = its.it_interval;
   rv = timer_settime(timerid, 0, &its, 0);
   if (rv) {
@@ -341,8 +341,8 @@ ProfileHandler::ProfileHandler()
   // Get frequency of interrupts (if specified)
   char junk;
   const char* fr = getenv("CPUPROFILE_FREQUENCY");
-  if (fr != NULL && (sscanf(fr, "%u%c", &frequency_, &junk) == 1) &&
-      (frequency_ > 0)) {
+  if (fr != NULL && (sscanf(fr, "%f%c", &frequency_, &junk) == 1) &&
+      (frequency_ >= 1.0)) {
     // Limit to kMaxFrequency
     frequency_ = (frequency_ > kMaxFrequency) ? kMaxFrequency : frequency_;
   } else {
@@ -535,7 +535,7 @@ void ProfileHandler::UpdateTimer(bool enable) {
 
   struct itimerval timer;
   static const int kMillion = 1000000;
-  int interval_usec = enable ? kMillion / frequency_ : 0;
+  int interval_usec = enable ? static_cast<int>(kMillion / frequency_) : 0;
   timer.it_interval.tv_sec = interval_usec / kMillion;
   timer.it_interval.tv_usec = interval_usec % kMillion;
   timer.it_value = timer.it_interval;

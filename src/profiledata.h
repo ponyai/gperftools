@@ -90,15 +90,15 @@ class ProfileData {
     Options();
 
     // Get and set the sample frequency.
-    int frequency() const {
+    float frequency() const {
       return frequency_;
     }
-    void set_frequency(int frequency) {
+    void set_frequency(float frequency) {
       frequency_ = frequency;
     }
 
    private:
-    int      frequency_;                  // Sample frequency.
+    float      frequency_;                  // Sample frequency.
   };
 
   static const int kMaxStackDepth = 254;  // Max stack depth stored in profile
